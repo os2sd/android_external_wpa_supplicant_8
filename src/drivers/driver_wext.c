@@ -41,9 +41,11 @@ static int wpa_driver_wext_finish_drv_init(struct wpa_driver_wext_data *drv);
 static void wpa_driver_wext_disconnect(struct wpa_driver_wext_data *drv);
 static int wpa_driver_wext_set_auth_alg(void *priv, int auth_alg);
 
-#ifdef HAVE_PRIVATE_LIB
+#if defined(HAVE_PRIVATE_LIB) && defined(CONFIG_DRIVER_WEXT)
 extern int wpa_driver_wext_driver_cmd(void *priv, char *cmd, char *buf,
                                         size_t buf_len);
+extern int wpa_driver_wext_combo_scan(void *priv,
+                                        struct wpa_driver_scan_params *params);
 extern int wpa_driver_signal_poll(void *priv, struct wpa_signal_info *si);
 #endif
 
@@ -1031,6 +1033,13 @@ int wpa_driver_wext_scan(void *priv, struct wpa_driver_scan_params *params)
 	const u8 *ssid = params->ssids[0].ssid;
 	size_t ssid_len = params->ssids[0].ssid_len;
 
+#if defined(HAVE_PRIVATE_LIB) && defined(CONFIG_DRIVER_WEXT)
+        if (drv->capa.max_scan_ssids > 1) {
+                ret = wpa_driver_wext_combo_scan(priv, params);
+                goto scan_out;
+        }
+#endif
+
 	if (ssid_len > IW_ESSID_MAX_SIZE) {
 		wpa_printf(MSG_DEBUG, "%s: too long SSID (%lu)",
 			   __FUNCTION__, (unsigned long) ssid_len);
@@ -1055,7 +1064,9 @@ int wpa_driver_wext_scan(void *priv, struct wpa_driver_scan_params *params)
 		perror("ioctl[SIOCSIWSCAN]");
 		ret = -1;
 	}
-
+#if defined(HAVE_PRIVATE_LIB) && defined(CONFIG_DRIVER_WEXT)
+scan_out:
+#endif
 	/* Not all drivers generate "scan completed" wireless event, so try to
 	 * read results after a timeout. */
 	timeout = 10;
@@ -1590,7 +1601,11 @@ static int wpa_driver_wext_get_range(void *priv)
 		drv->capa.auth = WPA_DRIVER_AUTH_OPEN |
 			WPA_DRIVER_AUTH_SHARED |
 			WPA_DRIVER_AUTH_LEAP;
-		drv->capa.max_scan_ssids = 1;
+#ifdef ANDROID
+                drv->capa.max_scan_ssids = WEXT_CSCAN_AMOUNT;
+#else
+                drv->capa.max_scan_ssids = 1;
+#endif
 
 		wpa_printf(MSG_DEBUG, "  capabilities: key_mgmt 0x%x enc 0x%x "
 			   "flags 0x%x",
@@ -2503,7 +2518,7 @@ const struct wpa_driver_ops wpa_driver_wext_ops = {
 #ifdef ANDROID
 	.sched_scan = wext_sched_scan,
 	.stop_sched_scan = wext_stop_sched_scan,
-#ifdef HAVE_PRIVATE_LIB
+#if defined(HAVE_PRIVATE_LIB) && defined(CONFIG_DRIVER_WEXT)
         .signal_poll = wpa_driver_signal_poll,
         .driver_cmd = wpa_driver_wext_driver_cmd,
 #endif
