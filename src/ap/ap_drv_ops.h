@@ -31,8 +31,8 @@ int hostapd_set_drv_ieee8021x(struct hostapd_data *hapd, const char *ifname,
 			      int enabled);
 int hostapd_vlan_if_add(struct hostapd_data *hapd, const char *ifname);
 int hostapd_vlan_if_remove(struct hostapd_data *hapd, const char *ifname);
-int hostapd_set_wds_sta(struct hostapd_data *hapd, const u8 *addr, int aid,
-			int val);
+int hostapd_set_wds_sta(struct hostapd_data *hapd, char *ifname_wds,
+			const u8 *addr, int aid, int val);
 int hostapd_sta_add(struct hostapd_data *hapd,
 		    const u8 *addr, u16 aid, u16 capability,
 		    const u8 *supp_rates, size_t supp_rates_len,
@@ -223,6 +223,16 @@ static inline void hostapd_drv_poll_client(struct hostapd_data *hapd,
 	if (hapd->driver == NULL || hapd->driver->poll_client == NULL)
 		return;
 	hapd->driver->poll_client(hapd->drv_priv, own_addr, addr, qos);
+}
+
+static inline int hostapd_drv_get_survey(struct hostapd_data *hapd,
+					 unsigned int freq)
+{
+	if (hapd->driver == NULL)
+		return -1;
+	if (!hapd->driver->get_survey)
+		return -1;
+	return hapd->driver->get_survey(hapd->drv_priv, freq);
 }
 
 #endif /* AP_DRV_OPS */

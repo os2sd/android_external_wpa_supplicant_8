@@ -17,6 +17,7 @@
 #include "crypto/sha1.h"
 #include "eapol_supp/eapol_supp_sm.h"
 #include "eap_peer/eap.h"
+#include "eap_peer/eap_proxy.h"
 #include "eap_server/eap_methods.h"
 #include "rsn_supp/wpa.h"
 #include "eloop.h"
@@ -420,6 +421,7 @@ static void wpa_supplicant_cleanup(struct wpa_supplicant *wpa_s)
 
 	wpa_bss_deinit(wpa_s);
 
+	wpa_supplicant_cancel_delayed_sched_scan(wpa_s);
 	wpa_supplicant_cancel_scan(wpa_s);
 	wpa_supplicant_cancel_auth_timeout(wpa_s);
 	eloop_cancel_timeout(wpa_supplicant_stop_countermeasures, wpa_s, NULL);
@@ -1280,9 +1282,10 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 	enum wpa_cipher cipher_pairwise, cipher_group;
 	struct wpa_driver_associate_params params;
 	int wep_keys_set = 0;
-	struct wpa_driver_capa capa;
 	int assoc_failed = 0;
 	struct wpa_ssid *old_ssid;
+	u8 ext_capab[10];
+	int ext_capab_len;
 #ifdef CONFIG_HT_OVERRIDES
 	struct ieee80211_ht_capabilities htcaps;
 	struct ieee80211_ht_capabilities htcaps_mask;
@@ -1306,6 +1309,8 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 		}
 		if (wpa_supplicant_create_ap(wpa_s, ssid) < 0) {
 			wpa_supplicant_set_state(wpa_s, WPA_DISCONNECTED);
+			if (ssid->mode == WPAS_MODE_P2P_GROUP_FORMATION)
+				wpas_p2p_ap_setup_failed(wpa_s);
 			return;
 		}
 		wpa_s->current_bss = bss;
@@ -1482,7 +1487,7 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 #endif /* CONFIG_P2P */
 
 #ifdef CONFIG_HS20
-	if (wpa_s->conf->hs20) {
+	if (is_hs20_network(wpa_s, ssid, bss)) {
 		struct wpabuf *hs20;
 		hs20 = wpabuf_alloc(20);
 		if (hs20) {
@@ -1495,27 +1500,15 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 	}
 #endif /* CONFIG_HS20 */
 
-	/*
-	 * Workaround: Add Extended Capabilities element only if the AP
-	 * included this element in Beacon/Probe Response frames. Some older
-	 * APs seem to have interoperability issues if this element is
-	 * included, so while the standard may require us to include the
-	 * element in all cases, it is justifiable to skip it to avoid
-	 * interoperability issues.
-	 */
-	if (!bss || wpa_bss_get_ie(bss, WLAN_EID_EXT_CAPAB)) {
-		u8 ext_capab[10];
-		int ext_capab_len;
-		ext_capab_len = wpas_build_ext_capab(wpa_s, ext_capab);
-		if (ext_capab_len > 0) {
-			u8 *pos = wpa_ie;
-			if (wpa_ie_len > 0 && pos[0] == WLAN_EID_RSN)
-				pos += 2 + pos[1];
-			os_memmove(pos + ext_capab_len, pos,
-				   wpa_ie_len - (pos - wpa_ie));
-			wpa_ie_len += ext_capab_len;
-			os_memcpy(pos, ext_capab, ext_capab_len);
-		}
+	ext_capab_len = wpas_build_ext_capab(wpa_s, ext_capab);
+	if (ext_capab_len > 0) {
+		u8 *pos = wpa_ie;
+		if (wpa_ie_len > 0 && pos[0] == WLAN_EID_RSN)
+			pos += 2 + pos[1];
+		os_memmove(pos + ext_capab_len, pos,
+			   wpa_ie_len - (pos - wpa_ie));
+		wpa_ie_len += ext_capab_len;
+		os_memcpy(pos, ext_capab, ext_capab_len);
 	}
 
 	wpa_clear_keys(wpa_s, bss ? bss->bssid : NULL);
@@ -1645,7 +1638,7 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 	/* If multichannel concurrency is not supported, check for any frequency
 	 * conflict and take appropriate action.
 	 */
-	if (!(wpa_s->drv_flags & WPA_DRIVER_FLAGS_MULTI_CHANNEL_CONCURRENT) &&
+	if ((wpa_s->num_multichan_concurrent < 2) &&
 		((freq = wpa_drv_shared_freq(wpa_s)) > 0) && (freq != params.freq)) {
 		wpa_printf(MSG_DEBUG, "Shared interface with conflicting frequency found (%d != %d)"
 																, freq, params.freq);
@@ -1705,8 +1698,8 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 		wpa_supplicant_req_auth_timeout(wpa_s, timeout, 0);
 	}
 
-	if (wep_keys_set && wpa_drv_get_capa(wpa_s, &capa) == 0 &&
-	    capa.flags & WPA_DRIVER_FLAGS_SET_KEYS_AFTER_ASSOC) {
+	if (wep_keys_set &&
+	    (wpa_s->drv_flags & WPA_DRIVER_FLAGS_SET_KEYS_AFTER_ASSOC)) {
 		/* Set static WEP keys again */
 		wpa_set_wep_keys(wpa_s, ssid);
 	}
@@ -1840,7 +1833,8 @@ void wpa_supplicant_enable_network(struct wpa_supplicant *wpa_s,
 			wpa_supplicant_cancel_sched_scan(wpa_s);
 		}
 
-		wpa_supplicant_req_scan(wpa_s, 0, 0);
+		if (wpa_supplicant_fast_associate(wpa_s) != 1)
+			wpa_supplicant_req_scan(wpa_s, 0, 0);
 	}
 }
 
@@ -1946,8 +1940,10 @@ void wpa_supplicant_select_network(struct wpa_supplicant *wpa_s,
 		return;
 	}
 
-	if (ssid)
+	if (ssid) {
 		wpa_s->current_ssid = ssid;
+		eapol_sm_notify_config(wpa_s->eapol, NULL, NULL);
+	}
 	wpa_s->connect_without_scan = NULL;
 	wpa_s->disconnected = 0;
 	wpa_s->reassociate = 1;
@@ -2363,7 +2359,10 @@ int wpa_supplicant_update_mac_addr(struct wpa_supplicant *wpa_s)
 		const u8 *addr = wpa_drv_get_mac_addr(wpa_s);
 		if (addr)
 			os_memcpy(wpa_s->own_addr, addr, ETH_ALEN);
-	} else if (!(wpa_s->drv_flags &
+	} else if ((!wpa_s->p2p_mgmt ||
+		    !(wpa_s->drv_flags &
+		      WPA_DRIVER_FLAGS_DEDICATED_P2P_DEVICE)) &&
+		   !(wpa_s->drv_flags &
 		     WPA_DRIVER_FLAGS_P2P_DEDICATED_INTERFACE)) {
 		l2_packet_deinit(wpa_s->l2);
 		wpa_s->l2 = l2_packet_init(wpa_s->ifname,
@@ -2382,10 +2381,6 @@ int wpa_supplicant_update_mac_addr(struct wpa_supplicant *wpa_s)
 		wpa_msg(wpa_s, MSG_ERROR, "Failed to get own L2 address");
 		return -1;
 	}
-
-	wpa_dbg(wpa_s, MSG_DEBUG, "Own MAC address: " MACSTR,
-		MAC2STR(wpa_s->own_addr));
-	wpa_sm_set_own_addr(wpa_s->wpa, wpa_s->own_addr);
 
 	return 0;
 }
@@ -2431,6 +2426,10 @@ int wpa_supplicant_driver_init(struct wpa_supplicant *wpa_s)
 
 	if (wpa_supplicant_update_mac_addr(wpa_s) < 0)
 		return -1;
+
+	wpa_dbg(wpa_s, MSG_DEBUG, "Own MAC address: " MACSTR,
+		MAC2STR(wpa_s->own_addr));
+	wpa_sm_set_own_addr(wpa_s->wpa, wpa_s->own_addr);
 
 	if (wpa_s->bridge_ifname[0]) {
 		wpa_dbg(wpa_s, MSG_DEBUG, "Receiving packets from bridge "
@@ -2870,6 +2869,11 @@ static int wpa_supplicant_init_iface(struct wpa_supplicant *wpa_s,
 			wpa_s->conf->driver_param =
 				os_strdup(iface->driver_param);
 		}
+
+		if (iface->p2p_mgmt && !iface->ctrl_interface) {
+			os_free(wpa_s->conf->ctrl_interface);
+			wpa_s->conf->ctrl_interface = NULL;
+		}
 	} else
 		wpa_s->conf = wpa_config_alloc_empty(iface->ctrl_interface,
 						     iface->driver_param);
@@ -2991,15 +2995,33 @@ next_driver:
 		wpa_s->extended_capa = capa.extended_capa;
 		wpa_s->extended_capa_mask = capa.extended_capa_mask;
 		wpa_s->extended_capa_len = capa.extended_capa_len;
+		wpa_s->num_multichan_concurrent =
+			capa.num_multichan_concurrent;
 	}
 	if (wpa_s->max_remain_on_chan == 0)
 		wpa_s->max_remain_on_chan = 1000;
+
+	/*
+	 * Only take p2p_mgmt parameters when P2P Device is supported.
+	 * Doing it here as it determines whether l2_packet_init() will be done
+	 * during wpa_supplicant_driver_init().
+	 */
+	if (wpa_s->drv_flags & WPA_DRIVER_FLAGS_DEDICATED_P2P_DEVICE)
+		wpa_s->p2p_mgmt = iface->p2p_mgmt;
+	else
+		iface->p2p_mgmt = 1;
+
+	if (wpa_s->num_multichan_concurrent == 0)
+		wpa_s->num_multichan_concurrent = 1;
 
 	if (wpa_supplicant_driver_init(wpa_s) < 0)
 		return -1;
 
 #ifdef CONFIG_TDLS
-	if (wpa_tdls_init(wpa_s->wpa))
+	if ((!iface->p2p_mgmt ||
+	     !(wpa_s->drv_flags &
+	       WPA_DRIVER_FLAGS_DEDICATED_P2P_DEVICE)) &&
+	    wpa_tdls_init(wpa_s->wpa))
 		return -1;
 #endif /* CONFIG_TDLS */
 
@@ -3037,7 +3059,7 @@ next_driver:
 	}
 
 #ifdef CONFIG_P2P
-	if (wpas_p2p_init(wpa_s->global, wpa_s) < 0) {
+	if (iface->p2p_mgmt && wpas_p2p_init(wpa_s->global, wpa_s) < 0) {
 		wpa_msg(wpa_s, MSG_ERROR, "Failed to init P2P");
 		return -1;
 	}
@@ -3045,6 +3067,20 @@ next_driver:
 
 	if (wpa_bss_init(wpa_s) < 0)
 		return -1;
+
+#ifdef CONFIG_EAP_PROXY
+{
+	size_t len;
+	wpa_s->mnc_len = eap_proxy_get_imsi(wpa_s->imsi, &len);
+	if (wpa_s->mnc_len > 0) {
+		wpa_s->imsi[len] = '\0';
+		wpa_printf(MSG_DEBUG, "eap_proxy: IMSI %s (MNC length %d)",
+			   wpa_s->imsi, wpa_s->mnc_len);
+	} else {
+		wpa_printf(MSG_DEBUG, "eap_proxy: IMSI not available");
+	}
+}
+#endif /* CONFIG_EAP_PROXY */
 
 	if (pcsc_reader_init(wpa_s) < 0)
 		return -1;
@@ -3096,6 +3132,8 @@ static void wpa_supplicant_deinit_iface(struct wpa_supplicant *wpa_s,
 		wpa_config_free(wpa_s->conf);
 		wpa_s->conf = NULL;
 	}
+
+	os_free(wpa_s);
 }
 
 
@@ -3146,14 +3184,12 @@ struct wpa_supplicant * wpa_supplicant_add_iface(struct wpa_global *global,
 		wpa_printf(MSG_DEBUG, "Failed to add interface %s",
 			   iface->ifname);
 		wpa_supplicant_deinit_iface(wpa_s, 0, 0);
-		os_free(wpa_s);
 		return NULL;
 	}
 
 	/* Notify the control interfaces about new iface */
 	if (wpas_notify_iface_added(wpa_s)) {
 		wpa_supplicant_deinit_iface(wpa_s, 1, 0);
-		os_free(wpa_s);
 		return NULL;
 	}
 
@@ -3206,7 +3242,6 @@ int wpa_supplicant_remove_iface(struct wpa_global *global,
 	if (global->p2p_invite_group == wpa_s)
 		global->p2p_invite_group = NULL;
 	wpa_supplicant_deinit_iface(wpa_s, 1, terminate);
-	os_free(wpa_s);
 
 	return 0;
 }
@@ -3326,6 +3361,9 @@ struct wpa_global * wpa_supplicant_init(struct wpa_params *params)
 	if (params->ctrl_interface)
 		global->params.ctrl_interface =
 			os_strdup(params->ctrl_interface);
+	if (params->ctrl_interface_group)
+		global->params.ctrl_interface_group =
+			os_strdup(params->ctrl_interface_group);
 	if (params->override_driver)
 		global->params.override_driver =
 			os_strdup(params->override_driver);
@@ -3435,9 +3473,6 @@ void wpa_supplicant_deinit(struct wpa_global *global)
 #ifdef CONFIG_WIFI_DISPLAY
 	wifi_display_deinit(global);
 #endif /* CONFIG_WIFI_DISPLAY */
-#ifdef CONFIG_P2P
-	wpas_p2p_deinit_global(global);
-#endif /* CONFIG_P2P */
 
 	while (global->ifaces)
 		wpa_supplicant_remove_iface(global, global->ifaces, 1);
@@ -3468,10 +3503,12 @@ void wpa_supplicant_deinit(struct wpa_global *global)
 		os_free(global->params.pid_file);
 	}
 	os_free(global->params.ctrl_interface);
+	os_free(global->params.ctrl_interface_group);
 	os_free(global->params.override_driver);
 	os_free(global->params.override_ctrl_interface);
 
 	os_free(global->p2p_disallow_freq);
+	os_free(global->add_psk);
 
 	os_free(global);
 	wpa_debug_close_syslog();
@@ -3615,6 +3652,12 @@ void wpas_connection_failed(struct wpa_supplicant *wpa_s, const u8 *bssid)
 	 * cleared due to no other BSSes being available.
 	 */
 	count += wpa_s->extra_blacklist_count;
+
+	if (count > 3 && wpa_s->current_ssid) {
+		wpa_printf(MSG_DEBUG, "Continuous association failures - "
+			   "consider temporary network disabling");
+		wpas_auth_failed(wpa_s);
+	}
 
 	switch (count) {
 	case 1:
@@ -3792,6 +3835,18 @@ void wpas_auth_failed(struct wpa_supplicant *wpa_s)
 		return;
 
 	ssid->auth_failures++;
+
+#ifdef CONFIG_P2P
+	if (ssid->p2p_group &&
+	    (wpa_s->p2p_in_provisioning || wpa_s->show_group_started)) {
+		/*
+		 * Skip the wait time since there is a short timeout on the
+		 * connection to a P2P group.
+		 */
+		return;
+	}
+#endif /* CONFIG_P2P */
+
 	if (ssid->auth_failures > 50)
 		dur = 300;
 	else if (ssid->auth_failures > 20)
@@ -3929,4 +3984,73 @@ int wpas_wpa_is_in_progress(struct wpa_supplicant *wpa_s)
 	}
 
 	return 0;
+}
+
+
+/*
+ * Find the operating frequencies of any of the virtual interfaces that
+ * are using the same radio as the current interface.
+ */
+int get_shared_radio_freqs(struct wpa_supplicant *wpa_s,
+			   int *freq_array, unsigned int len)
+{
+	const char *rn, *rn2;
+	struct wpa_supplicant *ifs;
+	u8 bssid[ETH_ALEN];
+	int freq;
+	unsigned int idx = 0, i;
+
+	os_memset(freq_array, 0, sizeof(int) * len);
+
+	/* First add the frequency of the local interface */
+	if (wpa_s->current_ssid != NULL && wpa_s->assoc_freq != 0) {
+		if (wpa_s->current_ssid->mode == WPAS_MODE_AP ||
+		    wpa_s->current_ssid->mode == WPAS_MODE_P2P_GO)
+			freq_array[idx++] = wpa_s->current_ssid->frequency;
+		else if (wpa_drv_get_bssid(wpa_s, bssid) == 0)
+			freq_array[idx++] = wpa_s->assoc_freq;
+	}
+
+	/* If get_radio_name is not supported, use only the local freq */
+	if (!wpa_s->driver->get_radio_name) {
+		freq = wpa_drv_shared_freq(wpa_s);
+		if (freq > 0 && idx < len &&
+		    (idx == 0 || freq_array[0] != freq))
+			freq_array[idx++] = freq;
+		return idx;
+	}
+
+	rn = wpa_s->driver->get_radio_name(wpa_s->drv_priv);
+	if (rn == NULL || rn[0] == '\0')
+		return idx;
+
+	for (ifs = wpa_s->global->ifaces, idx = 0; ifs && idx < len;
+	     ifs = ifs->next) {
+		if (wpa_s == ifs || !ifs->driver->get_radio_name)
+			continue;
+
+		rn2 = ifs->driver->get_radio_name(ifs->drv_priv);
+		if (!rn2 || os_strcmp(rn, rn2) != 0)
+			continue;
+
+		if (ifs->current_ssid == NULL || ifs->assoc_freq == 0)
+			continue;
+
+		if (ifs->current_ssid->mode == WPAS_MODE_AP ||
+		    ifs->current_ssid->mode == WPAS_MODE_P2P_GO)
+			freq = ifs->current_ssid->frequency;
+		else if (wpa_drv_get_bssid(ifs, bssid) == 0)
+			freq = ifs->assoc_freq;
+		else
+			continue;
+
+		/* Hold only distinct freqs */
+		for (i = 0; i < idx; i++)
+			if (freq_array[i] == freq)
+				break;
+
+		if (i == idx)
+			freq_array[idx++] = freq;
+	}
+	return idx;
 }

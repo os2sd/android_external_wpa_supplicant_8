@@ -357,12 +357,7 @@ struct p2p_data {
 	 * srv_update_indic - Service Update Indicator for local services
 	 */
 	u16 srv_update_indic;
-#ifdef ANDROID_P2P
-	/**
-	 * srv_count - Registered services count
-	 */
-	u16 srv_count;
-#endif
+
 	struct wpabuf *sd_resp; /* Fragmented SD response */
 	u8 sd_resp_addr[ETH_ALEN];
 	u8 sd_resp_dialog_token;
@@ -398,6 +393,7 @@ struct p2p_data {
 	} start_after_scan;
 	u8 after_scan_peer[ETH_ALEN];
 	struct p2p_pending_action_tx *after_scan_tx;
+	unsigned int after_scan_tx_in_progress:1;
 
 	/* Requested device types for find/search */
 	unsigned int num_req_dev_types;
@@ -576,6 +572,9 @@ void p2p_channels_intersect(const struct p2p_channels *a,
 			    struct p2p_channels *res);
 int p2p_channels_includes(const struct p2p_channels *channels, u8 reg_class,
 			  u8 channel);
+#ifdef ANDROID_P2P
+size_t p2p_copy_reg_class(struct p2p_reg_class *dc, struct p2p_reg_class *sc);
+#endif
 
 /* p2p_parse.c */
 int p2p_parse_p2p_ie(const struct wpabuf *buf, struct p2p_message *msg);
@@ -729,5 +728,11 @@ int p2p_send_action(struct p2p_data *p2p, unsigned int freq, const u8 *dst,
 void p2p_stop_listen_for_freq(struct p2p_data *p2p, int freq);
 int p2p_prepare_channel(struct p2p_data *p2p, struct p2p_device *dev,
 			unsigned int force_freq, unsigned int pref_freq);
+void p2p_dbg(struct p2p_data *p2p, const char *fmt, ...)
+PRINTF_FORMAT(2, 3);
+void p2p_info(struct p2p_data *p2p, const char *fmt, ...)
+PRINTF_FORMAT(2, 3);
+void p2p_err(struct p2p_data *p2p, const char *fmt, ...)
+PRINTF_FORMAT(2, 3);
 
 #endif /* P2P_I_H */

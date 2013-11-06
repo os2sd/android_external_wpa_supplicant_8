@@ -221,30 +221,6 @@ static int hostapd_broadcast_wep_set(struct hostapd_data *hapd)
 		errors++;
 	}
 
-	if (ssid->dyn_vlan_keys) {
-		size_t i;
-		for (i = 0; i <= ssid->max_dyn_vlan_keys; i++) {
-			const char *ifname;
-			struct hostapd_wep_keys *key = ssid->dyn_vlan_keys[i];
-			if (key == NULL)
-				continue;
-			ifname = hostapd_get_vlan_id_ifname(hapd->conf->vlan,
-							    i);
-			if (ifname == NULL)
-				continue;
-
-			idx = key->idx;
-			if (hostapd_drv_set_key(ifname, hapd, WPA_ALG_WEP,
-						broadcast_ether_addr, idx, 1,
-						NULL, 0, key->key[idx],
-						key->len[idx])) {
-				wpa_printf(MSG_WARNING, "Could not set "
-					   "dynamic VLAN WEP encryption.");
-				errors++;
-			}
-		}
-	}
-
 	return errors;
 }
 
@@ -806,7 +782,8 @@ static int hostapd_setup_bss(struct hostapd_data *hapd, int first)
 		return -1;
 	}
 
-	ieee802_11_set_beacon(hapd);
+	if (!hapd->conf->start_disabled)
+		ieee802_11_set_beacon(hapd);
 
 	if (hapd->wpa_auth && wpa_init_keys(hapd->wpa_auth) < 0)
 		return -1;
@@ -941,6 +918,10 @@ static int setup_interface(struct hostapd_iface *iface)
 			wpa_printf(MSG_ERROR, "Could not select hw_mode and "
 				   "channel. (%d)", ret);
 			return -1;
+		}
+		if (ret == 1) {
+			wpa_printf(MSG_DEBUG, "Interface initialization will be completed in a callback (ACS)");
+			return 0;
 		}
 		ret = hostapd_check_ht_capab(iface);
 		if (ret < 0)

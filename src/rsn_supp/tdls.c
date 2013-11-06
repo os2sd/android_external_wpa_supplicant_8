@@ -90,6 +90,7 @@ static void wpa_tdls_disable_peer_link(struct wpa_sm *sm,
 
 struct wpa_tdls_peer {
 	struct wpa_tdls_peer *next;
+	unsigned int reconfig_key:1;
 	int initiator; /* whether this end was initiator for TDLS setup */
 	u8 addr[ETH_ALEN]; /* other end MAC address */
 	u8 inonce[WPA_NONCE_LEN]; /* Initiator Nonce */
@@ -621,6 +622,7 @@ static void wpa_tdls_peer_free(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 		   MAC2STR(peer->addr));
 	eloop_cancel_timeout(wpa_tdls_tpk_timeout, sm, peer);
 	eloop_cancel_timeout(wpa_tdls_tpk_retry_timeout, sm, peer);
+	peer->reconfig_key = 0;
 	peer->initiator = 0;
 	peer->tpk_in_progress = 0;
 	os_free(peer->sm_tmr.buf);
@@ -700,13 +702,8 @@ int wpa_tdls_send_teardown(struct wpa_sm *sm, const u8 *addr, u16 reason_code)
 		return -1;
 	pos = rbuf;
 
-	if (!wpa_tdls_get_privacy(sm) || !peer->tpk_set || !peer->tpk_success) {
-		if (reason_code != WLAN_REASON_DEAUTH_LEAVING) {
-			/* Overwrite the reason code */
-			reason_code = WLAN_REASON_TDLS_TEARDOWN_UNSPECIFIED;
-		}
+	if (!wpa_tdls_get_privacy(sm) || !peer->tpk_set || !peer->tpk_success)
 		goto skip_ies;
-	}
 
 	ftie = (struct wpa_tdls_ftie *) pos;
 	ftie->ie_type = WLAN_EID_FAST_BSS_TRANSITION;
@@ -1760,7 +1757,7 @@ error:
 }
 
 
-static void wpa_tdls_enable_link(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
+static int wpa_tdls_enable_link(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 {
 	peer->tpk_success = 1;
 	peer->tpk_in_progress = 0;
@@ -1785,15 +1782,23 @@ static void wpa_tdls_enable_link(struct wpa_sm *sm, struct wpa_tdls_peer *peer)
 	}
 
 	/* add supported rates, capabilities, and qos_info to the TDLS peer */
-	wpa_sm_tdls_peer_addset(sm, peer->addr, 0, peer->aid,
-				peer->capability,
-				peer->supp_rates, peer->supp_rates_len,
-				peer->ht_capabilities,
-				peer->vht_capabilities,
-				peer->qos_info, peer->ext_capab,
-				peer->ext_capab_len);
+	if (wpa_sm_tdls_peer_addset(sm, peer->addr, 0, peer->aid,
+				    peer->capability,
+				    peer->supp_rates, peer->supp_rates_len,
+				    peer->ht_capabilities,
+				    peer->vht_capabilities,
+				    peer->qos_info, peer->ext_capab,
+				    peer->ext_capab_len) < 0)
+		return -1;
 
-	wpa_sm_tdls_oper(sm, TDLS_ENABLE_LINK, peer->addr);
+	if (peer->reconfig_key && wpa_tdls_set_key(sm, peer) < 0) {
+		wpa_printf(MSG_INFO, "TDLS: Could not configure key to the "
+			   "driver");
+		return -1;
+	}
+	peer->reconfig_key = 0;
+
+	return wpa_sm_tdls_oper(sm, TDLS_ENABLE_LINK, peer->addr);
 }
 
 
@@ -1812,6 +1817,7 @@ static int wpa_tdls_process_tpk_m2(struct wpa_sm *sm, const u8 *src_addr,
 	int ielen;
 	u16 status;
 	const u8 *pos;
+	int ret;
 
 	wpa_printf(MSG_DEBUG, "TDLS: Received TDLS Setup Response / TPK M2 "
 		   "(Peer " MACSTR ")", MAC2STR(src_addr));
@@ -2008,7 +2014,15 @@ static int wpa_tdls_process_tpk_m2(struct wpa_sm *sm, const u8 *src_addr,
 		return -1;
 	}
 
-	wpa_tdls_set_key(sm, peer);
+	if (wpa_tdls_set_key(sm, peer) < 0) {
+		/*
+		 * Some drivers may not be able to config the key prior to full
+		 * STA entry having been configured.
+		 */
+		wpa_printf(MSG_DEBUG, "TDLS: Try to configure TPK again after "
+			   "STA entry is complete");
+		peer->reconfig_key = 1;
+	}
 
 skip_rsn:
 	peer->dtoken = dtoken;
@@ -2019,9 +2033,14 @@ skip_rsn:
 		wpa_tdls_disable_peer_link(sm, peer);
 		return -1;
 	}
-	wpa_tdls_enable_link(sm, peer);
 
-	return 0;
+	ret = wpa_tdls_enable_link(sm, peer);
+	if (ret < 0) {
+		wpa_printf(MSG_DEBUG, "TDLS: Could not enable link");
+		wpa_tdls_do_teardown(sm, peer,
+				     WLAN_REASON_TDLS_TEARDOWN_UNSPECIFIED);
+	}
+	return ret;
 
 error:
 	wpa_tdls_send_error(sm, src_addr, WLAN_TDLS_SETUP_CONFIRM, dtoken,
@@ -2043,6 +2062,7 @@ static int wpa_tdls_process_tpk_m3(struct wpa_sm *sm, const u8 *src_addr,
 	u16 status;
 	const u8 *pos;
 	u32 lifetime;
+	int ret;
 
 	wpa_printf(MSG_DEBUG, "TDLS: Received TDLS Setup Confirm / TPK M3 "
 		   "(Peer " MACSTR ")", MAC2STR(src_addr));
@@ -2148,13 +2168,24 @@ static int wpa_tdls_process_tpk_m3(struct wpa_sm *sm, const u8 *src_addr,
 		goto error;
 	}
 
-	if (wpa_tdls_set_key(sm, peer) < 0)
-		return -1;
+	if (wpa_tdls_set_key(sm, peer) < 0) {
+		/*
+		 * Some drivers may not be able to config the key prior to full
+		 * STA entry having been configured.
+		 */
+		wpa_printf(MSG_DEBUG, "TDLS: Try to configure TPK again after "
+			   "STA entry is complete");
+		peer->reconfig_key = 1;
+	}
 
 skip_rsn:
-	wpa_tdls_enable_link(sm, peer);
-
-	return 0;
+	ret = wpa_tdls_enable_link(sm, peer);
+	if (ret < 0) {
+		wpa_printf(MSG_DEBUG, "TDLS: Could not enable link");
+		wpa_tdls_do_teardown(sm, peer,
+				     WLAN_REASON_TDLS_TEARDOWN_UNSPECIFIED);
+	}
+	return ret;
 error:
 	wpa_tdls_disable_peer_link(sm, peer);
 	return -1;
