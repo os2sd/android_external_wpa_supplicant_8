@@ -1624,6 +1624,8 @@ int interworking_home_sp_cred(struct wpa_supplicant *wpa_s,
 			      struct wpa_cred *cred,
 			      struct wpabuf *domain_names)
 {
+	size_t i;
+	int ret = -1;
 #ifdef INTERWORKING_3GPP
 	char nai[100], *realm;
 
@@ -1648,16 +1650,20 @@ int interworking_home_sp_cred(struct wpa_supplicant *wpa_s,
 		if (realm &&
 		    domain_name_list_contains(domain_names, realm))
 			return 1;
+		if (realm)
+			ret = 0;
 	}
 #endif /* INTERWORKING_3GPP */
 
 	if (domain_names == NULL || cred->domain == NULL)
-		return 0;
+		return ret;
 
-	wpa_printf(MSG_DEBUG, "Interworking: Search for match with "
-		   "home SP FQDN %s", cred->domain);
-	if (domain_name_list_contains(domain_names, cred->domain))
-		return 1;
+	for (i = 0; i < cred->num_domain; i++) {
+		wpa_printf(MSG_DEBUG, "Interworking: Search for match with "
+			   "home SP FQDN %s", cred->domain[i]);
+		if (domain_name_list_contains(domain_names, cred->domain[i]))
+			return 1;
+	}
 
 	return 0;
 }
