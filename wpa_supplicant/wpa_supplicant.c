@@ -1226,13 +1226,18 @@ static void wpas_ext_capab_byte(struct wpa_supplicant *wpa_s, u8 *pos, int idx)
 }
 
 
-int wpas_build_ext_capab(struct wpa_supplicant *wpa_s, u8 *buf)
+int wpas_build_ext_capab(struct wpa_supplicant *wpa_s, u8 *buf, size_t buflen)
 {
 	u8 *pos = buf;
 	u8 len = 4, i;
 
 	if (len < wpa_s->extended_capa_len)
 		len = wpa_s->extended_capa_len;
+	if (buflen < (size_t) len + 2) {
+		wpa_printf(MSG_INFO,
+			   "Not enough room for building extended capabilities element");
+		return -1;
+	}
 
 	*pos++ = WLAN_EID_EXT_CAPAB;
 	*pos++ = len;
@@ -1499,9 +1504,10 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 	 * interoperability issues.
 	 */
 	if (!bss || wpa_bss_get_ie(bss, WLAN_EID_EXT_CAPAB)) {
-		u8 ext_capab[10];
+		u8 ext_capab[18];
 		int ext_capab_len;
-		ext_capab_len = wpas_build_ext_capab(wpa_s, ext_capab);
+		ext_capab_len = wpas_build_ext_capab(wpa_s, ext_capab,
+						     sizeof(ext_capab));
 		if (ext_capab_len > 0) {
 			u8 *pos = wpa_ie;
 			if (wpa_ie_len > 0 && pos[0] == WLAN_EID_RSN)
