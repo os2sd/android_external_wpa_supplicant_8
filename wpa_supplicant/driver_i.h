@@ -713,7 +713,7 @@ static inline int wpa_drv_wnm_oper(struct wpa_supplicant *wpa_s,
 }
 
 static inline int wpa_drv_key_mgmt_set_pmk(struct wpa_supplicant *wpa_s,
-					 u8 *pmk)
+					   const u8 *pmk)
 {
 	if (!wpa_s->driver->key_mgmt_set_pmk)
 		return -1;

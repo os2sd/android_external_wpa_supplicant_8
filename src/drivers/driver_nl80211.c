@@ -3430,6 +3430,9 @@ static void wiphy_info_key_mgmt_offload_support(
 	if (flags & NL80211_KEY_MGMT_OFFLOAD_SUPPORT_PMKSA)
 		capa->key_mgmt_offload_support |=
 		  WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PMKSA;
+	if (flags & NL80211_KEY_MGMT_OFFLOAD_SUPPORT_FT_802_1X)
+		capa->key_mgmt_offload_support |=
+		  WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_FT_802_1X;
 }
 
 
@@ -3447,6 +3450,9 @@ static void wiphy_info_key_derive_offload_support(
 	if (flags & NL80211_KEY_DERIVE_OFFLOAD_SUPPORT_IGTK)
 		capa->key_derive_offload_support |=
 		  WPA_DRIVER_KEY_DERIVE_OFFLOAD_SUPPORT_IGTK;
+	if (flags & NL80211_KEY_DERIVE_OFFLOAD_SUPPORT_SHA256)
+		capa->key_derive_offload_support |=
+		  WPA_DRIVER_KEY_DERIVE_OFFLOAD_SUPPORT_SHA256;
 }
 
 
@@ -8107,30 +8113,52 @@ static int nl80211_set_key_mgmt_offload(
 
 	if ((params->key_mgmt_suite == KEY_MGMT_PSK) &&
 		  (capa->key_mgmt_offload_support &
-		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PSK) && params->psk) {
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PSK) &&
+		  params->psk) {
+		offload_key_mgmt = 1;
+		pass_psk = 1;
+	}
+
+	if ((params->key_mgmt_suite == KEY_MGMT_PSK_SHA256) &&
+		  (capa->key_mgmt_offload_support &
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PSK) &&
+		  (capa->key_derive_offload_support &
+		   WPA_DRIVER_KEY_DERIVE_OFFLOAD_SUPPORT_SHA256) &&
+		  params->psk) {
 		offload_key_mgmt = 1;
 		pass_psk = 1;
 	}
 
 	if ((params->key_mgmt_suite == KEY_MGMT_FT_PSK) &&
 		  (capa->key_mgmt_offload_support &
-		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_FT_PSK) && params->psk) {
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_FT_PSK) &&
+		  params->psk) {
 		offload_key_mgmt = 1;
 		pass_psk = 1;
 	}
 
 	if ((params->key_mgmt_suite == KEY_MGMT_802_1X) &&
 		  (capa->key_mgmt_offload_support &
-		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PMKSA)) {
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PMKSA))
 		offload_key_mgmt = 1;
-	}
+
+	if ((params->key_mgmt_suite == KEY_MGMT_802_1X_SHA256) &&
+		  (capa->key_mgmt_offload_support &
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_PMKSA) &&
+		  (capa->key_derive_offload_support &
+		   WPA_DRIVER_KEY_DERIVE_OFFLOAD_SUPPORT_SHA256))
+		offload_key_mgmt = 1;
+
+	if ((params->key_mgmt_suite == KEY_MGMT_FT_802_1X) &&
+		  (capa->key_mgmt_offload_support &
+		   WPA_DRIVER_KEY_MGMT_OFFLOAD_SUPPORT_FT_802_1X))
+		offload_key_mgmt = 1;
 
 	if (params->mgmt_frame_protection ==
 		  MGMT_FRAME_PROTECTION_REQUIRED)
 		if (!(capa->key_derive_offload_support &
 		    WPA_DRIVER_KEY_DERIVE_OFFLOAD_SUPPORT_IGTK))
 			offload_key_mgmt = 0;
-
 
 	if (offload_key_mgmt) {
 		NLA_PUT_FLAG(msg, NL80211_ATTR_OFFLOAD_KEY_MGMT);
