@@ -1615,12 +1615,22 @@ void wpa_supplicant_associate(struct wpa_supplicant *wpa_s,
 			params.psk = ssid->psk;
 	}
 
-	if (wpa_s->conf->key_mgmt_offload &&
-		 (params.key_mgmt_suite == KEY_MGMT_PSK ||
-		  params.key_mgmt_suite == KEY_MGMT_PSK_SHA256 ||
-		  params.key_mgmt_suite == KEY_MGMT_FT_PSK))
-		if (ssid->psk_set)
-			params.psk = ssid->psk;
+	if (wpa_s->conf->key_mgmt_offload) {
+
+		if (params.key_mgmt_suite == KEY_MGMT_802_1X ||
+		    params.key_mgmt_suite == KEY_MGMT_802_1X_SHA256)
+			params.req_key_mgmt_offload =
+			  ssid->proactive_key_caching < 0 ? wpa_s->conf->okc :
+			  ssid->proactive_key_caching;
+		else
+			params.req_key_mgmt_offload = 1;
+
+		if (params.key_mgmt_suite == KEY_MGMT_PSK ||
+		    params.key_mgmt_suite == KEY_MGMT_PSK_SHA256 ||
+		    params.key_mgmt_suite == KEY_MGMT_FT_PSK)
+			if (ssid->psk_set)
+				params.psk = ssid->psk;
+	}
 
 	params.drop_unencrypted = use_crypt;
 
