@@ -1158,6 +1158,12 @@ void wps_registrar_probe_req_rx(struct wps_registrar *reg, const u8 *addr,
 	}
 #endif /* WPS_WORKAROUNDS */
 
+	if (!reg->pbc) {
+		wpa_printf(MSG_DEBUG, "WPS: Skip adding PBC session "
+				"since PBC is not activacted");
+		skip_add = 1;
+	}
+
 	if (!skip_add)
 		wps_registrar_add_pbc_session(reg, addr, attr.uuid_e);
 	if (wps_registrar_pbc_overlap(reg, addr, attr.uuid_e)) {
