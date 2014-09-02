@@ -614,6 +614,8 @@ struct wpa_ssid {
 	 * dereferences since it may not be updated in all cases.
 	 */
 	void *parent_cred;
+
+	unsigned int wps_run;
 };
 
 #endif /* CONFIG_SSID_H */
