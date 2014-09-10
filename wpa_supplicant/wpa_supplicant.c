@@ -303,6 +303,7 @@ void wpa_supplicant_initiate_eapol(struct wpa_supplicant *wpa_s)
 		!wpa_key_mgmt_wpa_ieee8021x(wpa_s->key_mgmt) &&
 		wpa_s->key_mgmt != WPA_KEY_MGMT_IEEE8021X_NO_WPA &&
 		wpa_s->key_mgmt != WPA_KEY_MGMT_WPS;
+	eapol_conf.wps = wpa_s->key_mgmt == WPA_KEY_MGMT_WPS;
 	eapol_sm_notify_config(wpa_s->eapol, &ssid->eap, &eapol_conf);
 #endif /* IEEE8021X_EAPOL */
 }

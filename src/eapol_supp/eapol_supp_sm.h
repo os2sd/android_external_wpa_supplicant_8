@@ -53,6 +53,11 @@ struct eapol_config {
 	 * eap_disabled - Whether EAP is disabled
 	 */
 	int eap_disabled;
+
+	/**
+	 * wps - Whether this connection is used for WPS
+	 */
+	int wps;
 };
 
 struct eapol_sm;
