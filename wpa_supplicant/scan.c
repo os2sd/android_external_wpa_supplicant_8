@@ -194,10 +194,9 @@ wpa_supplicant_sched_scan_timeout(void *eloop_ctx, void *timeout_ctx)
 }
 
 
-static int
-wpa_supplicant_start_sched_scan(struct wpa_supplicant *wpa_s,
-				struct wpa_driver_scan_params *params,
-				int interval)
+int wpa_supplicant_start_sched_scan(struct wpa_supplicant *wpa_s,
+				    struct wpa_driver_scan_params *params,
+				    int interval)
 {
 	int ret;
 
@@ -213,7 +212,7 @@ wpa_supplicant_start_sched_scan(struct wpa_supplicant *wpa_s,
 }
 
 
-static int wpa_supplicant_stop_sched_scan(struct wpa_supplicant *wpa_s)
+int wpa_supplicant_stop_sched_scan(struct wpa_supplicant *wpa_s)
 {
 	int ret;
 
@@ -567,13 +566,17 @@ static void wpa_supplicant_scan(void *eloop_ctx, void *timeout_ctx)
 		wpas_p2p_continue_after_scan(wpa_s);
 		return;
 	}
-#ifdef ANDROID
+
 	if (wpa_s->scanning) {
-		/* If we are already in scanning state, we shall ignore this new scan request*/
-		wpa_dbg(wpa_s, MSG_DEBUG, "Skip scan - already scanning");
+		/*
+		 * If we are already in scanning state, we shall reschedule the
+		 * the incoming scan request.
+		 */
+		wpa_dbg(wpa_s, MSG_DEBUG, "Already scanning - Reschedule the incoming scan req");
+		wpa_supplicant_req_scan(wpa_s, 1, 0);
 		return;
 	}
-#endif
+
 	if (!wpa_supplicant_enabled_networks(wpa_s) &&
 	    wpa_s->scan_req == NORMAL_SCAN_REQ) {
 		wpa_dbg(wpa_s, MSG_DEBUG, "No enabled networks - do not scan");
