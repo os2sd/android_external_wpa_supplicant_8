@@ -54,6 +54,8 @@ struct eapol_config {
 	 */
 	int eap_disabled;
 
+#define EAPOL_LOCAL_WPS_IN_USE BIT(0)
+#define EAPOL_PEER_IS_WPS20_AP BIT(1)
 	/**
 	 * wps - Whether this connection is used for WPS
 	 */
