@@ -54,10 +54,15 @@ enum qca_radiotap_vendor_ids {
  * @QCA_NL80211_VENDOR_SUBCMD_KEY_MGMT_SET_KEY: Set key operation that can be
  *	used to configure PMK to the driver even when not connected. This can
  *	be used to request offloading of key management operations.
+ *
  * @QCA_NL80211_VENDOR_SUBCMD_KEY_MGMT_ROAM_AUTH: An extended version of
  *	NL80211_CMD_ROAM event with optional attributes including information
  *	from offloaded key management operation. Uses
  *	enum qca_wlan_vendor_attr_roam_auth attributes.
+ *
+ * @QCA_NL80211_VENDOR_SUBCMD_DO_ACS: ACS command/event which is used to
+ *	invoke the ACS function in device and pass selected channels to
+ *	hostapd.
  */
 enum qca_nl80211_vendor_subcmds {
 	QCA_NL80211_VENDOR_SUBCMD_UNSPEC = 0,
@@ -102,8 +107,8 @@ enum qca_nl80211_vendor_subcmds {
 	QCA_NL80211_VENDOR_SUBCMD_KEY_MGMT_ROAM_AUTH = 51,
 	QCA_NL80211_VENDOR_SUBCMD_APFIND = 52,
 	/* 53 - reserved for QCA */
+	QCA_NL80211_VENDOR_SUBCMD_DO_ACS = 54,
 };
-
 
 enum qca_wlan_vendor_attr {
 	QCA_WLAN_VENDOR_ATTR_INVALID = 0,
@@ -124,12 +129,10 @@ enum qca_wlan_vendor_attr {
 	QCA_WLAN_VENDOR_ATTR_MAX	= QCA_WLAN_VENDOR_ATTR_AFTER_LAST - 1,
 };
 
-
 enum qca_roaming_policy {
 	QCA_ROAMING_NOT_ALLOWED,
 	QCA_ROAMING_ALLOWED_WITHIN_ESS,
 };
-
 
 enum qca_wlan_vendor_attr_roam_auth {
 	QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_INVALID = 0,
@@ -144,6 +147,26 @@ enum qca_wlan_vendor_attr_roam_auth {
 	QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_MAX =
 	QCA_WLAN_VENDOR_ATTR_ROAM_AUTH_AFTER_LAST - 1
+};
+
+enum qca_wlan_vendor_attr_acs_offload {
+	QCA_WLAN_VENDOR_ATTR_ACS_CHANNEL_INVALID = 0,
+	QCA_WLAN_VENDOR_ATTR_ACS_PRIMARY_CHANNEL,
+	QCA_WLAN_VENDOR_ATTR_ACS_SECONDARY_CHANNEL,
+	QCA_WLAN_VENDOR_ATTR_ACS_HW_MODE,
+	QCA_WLAN_VENDOR_ATTR_ACS_HT_ENABLED,
+	QCA_WLAN_VENDOR_ATTR_ACS_HT40_ENABLED,
+	/* keep last */
+	QCA_WLAN_VENDOR_ATTR_ACS_AFTER_LAST,
+	QCA_WLAN_VENDOR_ATTR_ACS_MAX =
+	QCA_WLAN_VENDOR_ATTR_ACS_AFTER_LAST - 1
+};
+
+enum qca_wlan_vendor_acs_hw_mode {
+	QCA_ACS_MODE_IEEE80211B,
+	QCA_ACS_MODE_IEEE80211G,
+	QCA_ACS_MODE_IEEE80211A,
+	QCA_ACS_MODE_IEEE80211AD,
 };
 
 #endif /* QCA_VENDOR_H */
