@@ -1013,6 +1013,8 @@ struct wpa_driver_capa {
 #define WPA_DRIVER_FLAGS_AP_CSA				0x80000000
 /* Driver supports mesh */
 #define WPA_DRIVER_FLAGS_MESH			0x0000000100000000ULL
+/* Driver support ACS offload */
+#define WPA_DRIVER_FLAGS_ACS_OFFLOAD		0x0000000200000000ULL
 	u64 flags;
 
 	int max_scan_ssids;
@@ -1330,6 +1332,17 @@ struct macsec_init_params {
 	Boolean use_scb;
 };
 #endif /* CONFIG_MACSEC */
+
+struct drv_acs_params {
+	/* Selected mode (HOSTAPD_MODE_*) */
+	enum hostapd_hw_mode hw_mode;
+
+	/* Indicates whether HT is enabled */
+	int ht_enabled;
+
+	/* Indicates whether HT40 is enabled */
+	int ht40_enabled;
+};
 
 
 /**
@@ -3026,6 +3039,17 @@ struct wpa_driver_ops {
 	 */
 	int (*disable_transmit_sa)(void *priv, u32 channel, u8 an);
 #endif /* CONFIG_MACSEC */
+
+	/**
+	 * do_acs - Automatically select channel
+	 * @priv: Private driver interface data
+	 * @params: Parameters for ACS
+	 * Returns 0 on success, -1 on failure
+	 *
+	 * This command can be used to offload ACS to the driver if the driver
+	 * indicates support for such offloading (WPA_DRIVER_FLAGS_ACS_OFFLOAD).
+	 */
+	int (*do_acs)(void *priv, struct drv_acs_params *params);
 };
 
 
@@ -3501,7 +3525,15 @@ enum wpa_event_type {
 	 * to reduce issues due to interference or internal co-existence
 	 * information in the driver.
 	 */
-	EVENT_AVOID_FREQUENCIES
+	EVENT_AVOID_FREQUENCIES,
+
+	/**
+	 * EVENT_ACS_CHANNEL_SELECTED - Received selected channels by ACS
+	 *
+	 * Indicates a pair of primary and secondary channels chosen by ACS
+	 * in device.
+	 */
+	EVENT_ACS_CHANNEL_SELECTED
 };
 
 
@@ -4188,6 +4220,16 @@ union wpa_event_data {
 	 * This is used as the data with EVENT_AVOID_FREQUENCIES.
 	 */
 	struct wpa_freq_range_list freq_range;
+
+	/**
+	 * struct acs_selected_channels - Data for EVENT_ACS_CHANNEL_SELECTED
+	 * @pri_channel: Selected primary channel
+	 * @sec_channel: Selected secondary channel
+	 */
+	struct acs_selected_channels {
+		u8 pri_channel;
+		u8 sec_channel;
+	} acs_selected_channels;
 };
 
 /**
